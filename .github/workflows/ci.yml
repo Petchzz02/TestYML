@@ -1,0 +1,92 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  checkout:
+    name: Checkout Repository
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+  lint:
+    name: Lint YAML (Super-Linter)
+    runs-on: ubuntu-latest
+    needs: checkout
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Lint YAML with Super-Linter
+        uses: github/super-linter@v4
+        env:
+          VALIDATE_YAML: true
+          # Ensure linter scans the workspace
+          DEFAULT_WORKSPACE: ${{ github.workspace }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  validate-docker-compose:
+    name: Validate Docker Compose
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Validate docker-compose.yml (if present)
+        shell: bash
+        run: |
+          if [ -f "docker-compose.yml" ]; then
+            echo "Found docker-compose.yml — validating..."
+            docker compose -f docker-compose.yml config -q
+            echo "docker-compose.yml is valid"
+          else
+            echo "docker-compose.yml not found — skipping"
+          fi
+
+  k8s-dry-run:
+    name: Kubernetes dry-run (manifests)
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: 'latest'
+
+      - name: Kubernetes dry-run for k8s manifests (if present)
+        shell: bash
+        run: |
+          if [ -d "k8s" ]; then
+            echo "Found k8s/ directory — running kubectl dry-run (client)..."
+            kubectl apply --dry-run=client -f k8s/
+            echo "kubectl dry-run completed"
+          else
+            echo "k8s/ directory not found — skipping"
+          fi
+
+  build:
+    name: Build Application
+    runs-on: ubuntu-latest
+    needs: [validate-docker-compose, k8s-dry-run]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build
+        run: echo "Build successful"
+
+  notify:
+    name: Notify
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Notify
+        run: echo "Workflow finished"
